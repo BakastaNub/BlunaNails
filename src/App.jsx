@@ -1,20 +1,22 @@
 import { useState, useEffect } from 'react';
+import axios from 'axios';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
+import esLocale from '@fullcalendar/core/locales/es';
 import { 
   FaSpinner, FaHandSparkles, FaShoePrints, FaSearch, 
   FaCalendarAlt, FaPhoneAlt, FaEdit, FaTrashAlt, FaCheckCircle 
 } from 'react-icons/fa';
-import './index.css';  // o App.css si cambiaste el nombre
+import './index.css';
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbygxn8nzp9RCkerywYA2Il8NSC8-dlZ7p5sfNZ-B7pv7ANlVMZcOintliGBAvAG7OC9/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwLDtQGQqWBndlZfw8hcO0Fq5EaNYRxqLZkroTlEdjni96iLM1rUBlZExYyv_Nyhvdn/exec';
 
 function App() {
   const [mode, setMode] = useState('none');
   const [booked, setBooked] = useState({});
   const [createForm, setCreateForm] = useState({
-    name: '', phone: '', hands: false, feet: false, date: ''
+    name: '', phone: '', hands: false, feet: false, date: '', time: ''
   });
   const [searchPhone, setSearchPhone] = useState('');
   const [searchResult, setSearchResult] = useState(null);
@@ -26,9 +28,8 @@ function App() {
 
   const loadBookedDates = async () => {
     try {
-      const res = await fetch(`${SCRIPT_URL}?action=getBooked`);
-      const data = await res.json();
-      setBooked(data || {});
+      const res = await axios.get(`${SCRIPT_URL}?action=getBooked`);
+      setBooked(res.data || {});
     } catch (err) {
       console.error('Error cargando booked dates:', err);
     }
@@ -38,8 +39,14 @@ function App() {
     loadBookedDates();
   }, []);
 
+  const today = new Date().toISOString().split('T')[0];
+
   const handleDateClick = (info) => {
     const date = info.dateStr;
+    if (date < today) {
+      setStatus('No se pueden reservar fechas pasadas');
+      return;
+    }
     const count = booked[date] || 0;
     if (count >= 5) {
       setStatus('Este día ya está completo (máx. 5 citas)');
@@ -50,27 +57,68 @@ function App() {
   };
 
   const handleCreateSubmit = async (e) => {
-    e.preventDefault();
-    if (!createForm.date) return setStatus('Selecciona una fecha primero');
-    if (!createForm.hands && !createForm.feet) return setStatus('Selecciona al menos manos o pies');
+  e.preventDefault();
+  console.log("Formulario enviado → handleCreateSubmit iniciado"); // ← Depuración 1
 
-    try {
-      const payload = { action: 'create', ...createForm };
-      const res = await fetch(SCRIPT_URL, {
-        method: 'POST',
-        redirect: 'follow',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload)
-      });
+  if (!createForm.date) {
+    setStatus('Selecciona una fecha primero');
+    console.log("Falta fecha");
+    return;
+  }
+  if (!createForm.time) {
+    setStatus('Selecciona una hora');
+    console.log("Falta hora");
+    return;
+  }
+  if (!createForm.hands && !createForm.feet) {
+    setStatus('Selecciona al menos manos o pies');
+    console.log("Faltan servicios");
+    return;
+  }
 
-      setStatus('¡Cita reservada con éxito! 🎀');
-      setCreateForm({ name: '', phone: '', hands: false, feet: false, date: '' });
+  console.log("Datos a enviar:", createForm); // ← Depuración 2: qué se envía
+
+  setStatus('Enviando reserva...');
+
+  try {
+    const formData = new URLSearchParams();
+    formData.append('action', 'create');
+    formData.append('name', createForm.name.trim());
+    formData.append('phone', createForm.phone.trim());
+    formData.append('hands', createForm.hands ? 'true' : 'false'); // mejor formato para backend
+    formData.append('feet', createForm.feet ? 'true' : 'false');
+    formData.append('date', createForm.date);
+    formData.append('time', createForm.time);
+
+    console.log("URLSearchParams listo:", formData.toString()); // ← Depuración 3
+
+    const res = await axios.post(SCRIPT_URL, formData.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+
+    console.log("Respuesta del servidor:", res.data); // ← Depuración 4: qué devuelve
+
+    if (res.data.success) {
+      setStatus(`¡Cita reservada con éxito! 🎀 ID: ${res.data.id || 'generado'}`);
+      setCreateForm({ name: '', phone: '', hands: false, feet: false, date: '', time: '' });
       loadBookedDates();
-    } catch (err) {
-      console.error('Error creando cita:', err);
-      setStatus('Error al crear la cita');
+    } else {
+      setStatus(res.data.error || 'Error desconocido al guardar');
     }
-  };
+  } catch (err) {
+    console.error("Error completo al crear cita:", err);
+    if (err.response) {
+      // Error del servidor (4xx/5xx)
+      console.error("Respuesta con error:", err.response.data);
+      setStatus(`Error del servidor: ${err.response.data?.error || err.message}`);
+    } else if (err.request) {
+      // No hubo respuesta (problema de red, CORS, timeout)
+      setStatus('No se pudo conectar con el servidor. Revisa conexión o despliegue del script.');
+    } else {
+      setStatus('Error inesperado: ' + err.message);
+    }
+  }
+};
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -83,14 +131,20 @@ function App() {
     setIsEditing(false);
 
     try {
-      const res = await fetch(`${SCRIPT_URL}?action=findByPhone&phone=${encodeURIComponent(phone)}`);
-      const result = await res.json();
+      const res = await axios.get(`${SCRIPT_URL}?action=findByPhone&phone=${encodeURIComponent(phone)}`);
+      const result = res.data;
 
       if (result.success) {
         setSearchResult(result.booking);
-        setEditForm({ hands: result.booking.hands === 'Sí', feet: result.booking.feet === 'Sí' });
+        setEditForm({
+          hands: result.booking.hands === 'Sí',
+          feet: result.booking.feet === 'Sí'
+        });
+        if (result.bookings?.length > 1) {
+          setStatus(`Se encontraron ${result.bookings.length} citas activas. Mostrando la más reciente.`);
+        }
       } else {
-        setStatus(result.message || result.error || 'No se encontró ninguna cita');
+        setStatus(result.message || 'No se encontró ninguna cita programada');
       }
     } catch (err) {
       console.error('Error búsqueda:', err);
@@ -102,28 +156,40 @@ function App() {
 
   const handleEditSubmit = async () => {
     setEditLoading(true);
-    setStatus('Editando servicios...');
+    setStatus('Editando...');
+
+    if (!editForm.hands && !editForm.feet) {
+      if (window.confirm('Si desmarcas ambos servicios, se cancelará la cita. ¿Continuar?')) {
+        await handleCancel();
+        setEditLoading(false);
+        return;
+      } else {
+        setEditLoading(false);
+        return;
+      }
+    }
 
     try {
-      const payload = {
-        action: 'edit',
-        phone: searchPhone.trim(),
-        hands: editForm.hands,
-        feet: editForm.feet
-      };
-      const res = await fetch(SCRIPT_URL, {
-        method: 'POST',
-        redirect: 'follow',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload)
+      const formData = new URLSearchParams();
+      formData.append('action', 'edit');
+      formData.append('id', searchResult.id);           // ← Usamos ID
+      formData.append('hands', editForm.hands);
+      formData.append('feet', editForm.feet);
+
+      const res = await axios.post(SCRIPT_URL, formData.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
 
-      setStatus('¡Servicios actualizados correctamente! ✓');
-      setIsEditing(false);
-      await handleSearch({ preventDefault: () => {} });
+      if (res.data.success) {
+        setStatus('¡Servicios actualizados correctamente! ✓');
+        setIsEditing(false);
+        await handleSearch({ preventDefault: () => {} });
+      } else {
+        setStatus(res.data.error || 'No se pudo actualizar');
+      }
     } catch (err) {
-      console.error('Error edición:', err);
-      setStatus('Error al editar la cita');
+      console.error('Error edición:', err.response?.data || err);
+      setStatus('Error al editar');
     } finally {
       setEditLoading(false);
     }
@@ -133,19 +199,23 @@ function App() {
     if (!window.confirm('¿Estás seguro de cancelar esta cita? No se puede deshacer.')) return;
 
     try {
-      const payload = { action: 'cancel', phone: searchPhone.trim() };
-      const res = await fetch(SCRIPT_URL, {
-        method: 'POST',
-        redirect: 'follow',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload)
+      const formData = new URLSearchParams();
+      formData.append('action', 'cancel');
+      formData.append('id', searchResult.id);           // ← Usamos ID
+
+      const res = await axios.post(SCRIPT_URL, formData.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
 
-      setStatus('Cita cancelada correctamente');
-      setSearchResult(null);
-      loadBookedDates();
+      if (res.data.success) {
+        setStatus('Cita cancelada correctamente');
+        setSearchResult(null);
+        loadBookedDates();
+      } else {
+        setStatus(res.data.error || 'Error al cancelar');
+      }
     } catch (err) {
-      console.error('Error cancel:', err);
+      console.error('Error cancel:', err.response?.data || err);
       setStatus('Error al cancelar la cita');
     }
   };
@@ -156,6 +226,15 @@ function App() {
     setStatus('');
     setIsLoading(false);
     setIsEditing(false);
+  };
+
+  const formatTime12h = (time24) => {
+    if (!time24) return 'No especificada';
+    const [h, m] = time24.split(':');
+    const hour = parseInt(h, 10);
+    const hour12 = hour % 12 || 12;
+    const period = hour >= 12 ? 'PM' : 'AM';
+    return `${hour12}:${m} ${period}`;
   };
 
   return (
@@ -220,7 +299,7 @@ function App() {
                   checked={createForm.hands}
                   onChange={(e) => setCreateForm({ ...createForm, hands: e.target.checked })}
                 />
-                <FaHandSparkles style={{ marginLeft: '8px', marginRight: '6px', fontSize: '1.3rem' }} />
+                <FaHandSparkles style={{ marginLeft: '8px', marginRight: '6px' }} />
                 Manos (manicura)
               </label>
               <label>
@@ -229,48 +308,33 @@ function App() {
                   checked={createForm.feet}
                   onChange={(e) => setCreateForm({ ...createForm, feet: e.target.checked })}
                 />
-                <FaShoePrints style={{ marginLeft: '8px', marginRight: '6px', fontSize: '1.3rem' }} />
+                <FaShoePrints style={{ marginLeft: '8px', marginRight: '6px' }} />
                 Pies (pedicura)
               </label>
             </div>
 
             <div className="form-group">
               <label>Fecha seleccionada</label>
-              <div style={{ fontWeight: 'bold', color: createForm.date ? 'var(--primary)' : '#777' }}>
-                {createForm.date || 'Selecciona una fecha en el calendario'}
-              </div>
+              <input type="text" value={createForm.date || 'Selecciona en el calendario'} readOnly />
             </div>
 
-            <div style={{ display: 'flex', gap: '1rem', margin: '1.5rem 0' }}>
-              <button type="button" className="btn btn-secondary" onClick={loadBookedDates}>
-                Refrescar disponibilidad
-              </button>
-              <button type="submit" className="btn btn-create">
-                Confirmar Cita
-              </button>
+            <div className="form-group">
+              <label>Hora *</label>
+              <input
+                type="time"
+                min="09:00"
+                max="20:00"
+                step="1800"
+                value={createForm.time}
+                onChange={(e) => setCreateForm({ ...createForm, time: e.target.value })}
+                required
+              />
             </div>
+
+            <button type="submit" className="btn btn-create">
+              Reservar cita
+            </button>
           </form>
-
-          {status && (
-            <div className={`status-message ${status.includes('éxito') ? 'success' : status.includes('completo') || status.includes('Error') ? 'error' : 'info'}`}>
-              {status}
-            </div>
-          )}
-
-          <div style={{ marginTop: '2rem' }}>
-            <FullCalendar
-              plugins={[dayGridPlugin, interactionPlugin]}
-              initialView="dayGridMonth"
-              dateClick={handleDateClick}
-              events={Object.entries(booked).map(([date, count]) => ({
-                title: `${count} cita${count !== 1 ? 's' : ''}`,
-                start: date,
-                color: count >= 5 ? '#f44336' : '#ff9800'
-              }))}
-              height={500}
-              locale="es"
-            />
-          </div>
         </div>
       )}
 
@@ -323,6 +387,7 @@ function App() {
           {searchResult && !isLoading && (
             <div className="booking-result">
               <h3>Tu reserva ({searchResult.status})</h3>
+              <p><strong>ID de cita:</strong> {searchResult.id}</p>
               <p><strong>Nombre:</strong> {searchResult.name}</p>
               <p><strong>Teléfono:</strong> {searchResult.phone}</p>
               
@@ -333,12 +398,7 @@ function App() {
                 borderRadius: '12px', 
                 border: '1px solid #ffc1e3' 
               }}>
-                <strong style={{ 
-                  display: 'block', 
-                  marginBottom: '1rem', 
-                  fontSize: '1.1rem',
-                  color: 'var(--primary-dark)'
-                }}>
+                <strong style={{ display: 'block', marginBottom: '1rem', fontSize: '1.1rem', color: 'var(--primary-dark)' }}>
                   Servicios reservados:
                 </strong>
                 
@@ -377,7 +437,12 @@ function App() {
                 </div>
               </div>
 
-              <p><strong>Fecha:</strong> {searchResult.date}</p>
+              <p>
+                <strong>Fecha y hora:</strong> {searchResult.date}{' '}
+                <span style={{ fontWeight: 'bold', color: 'var(--primary)' }}>
+                  {formatTime12h(searchResult.time)}
+                </span>
+              </p>
 
               {searchResult.status === 'Programada' && (
                 <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
@@ -450,12 +515,45 @@ function App() {
           )}
 
           {status && !searchResult && !isLoading && (
-            <div className={`status-message ${status.includes('actualizados') || status.includes('éxito') ? 'success' : 'error'}`}>
+            <div className={`status-message ${status.includes('correctamente') || status.includes('éxito') ? 'success' : 'error'}`}>
               {status}
             </div>
           )}
         </div>
       )}
+
+      {/* Calendario siempre visible */}
+      <div className="card">
+        <h2>Calendario de disponibilidad</h2>
+        <FullCalendar
+          plugins={[dayGridPlugin, interactionPlugin]}
+          initialView="dayGridMonth"
+          editable={false}
+          selectable={false}
+          dateClick={handleDateClick}
+          events={Object.entries(booked).map(([date, count]) => {
+            if (date < today) return null;
+            return {
+              title: `${count} cita${count !== 1 ? 's' : ''}`,
+              start: date,
+              color: count >= 5 ? '#f44336' : '#ff9800'
+            };
+          }).filter(Boolean)}
+          height={500}
+          locale={esLocale}
+          headerToolbar={{
+            left: 'prev,next',
+            center: 'title',
+            right: ''
+          }}
+          dayCellClassNames={(arg) => {
+            if (arg.date.toISOString().split('T')[0] < today) {
+              return 'past-date';
+            }
+            return '';
+          }}
+        />
+      </div>
     </div>
   );
 }
