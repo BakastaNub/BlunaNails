@@ -7,7 +7,7 @@ import {
 } from 'react-icons/fa';
 import './index.css';
 
-const BASE_URL = 'https://cztzqqmoxrweebqtymij.supabase.co/functions/v1/';
+const BASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://cztzqqmoxrweebqtymij.supabase.co/functions/v1/';
 const CURRENT_YEAR = new Date().getFullYear();
 
 const URLS = {
