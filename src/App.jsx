@@ -130,11 +130,6 @@ function BookingApp() {
     return false;
   };
 
-  const isAllHoursBooked = () => {
-    const allHours = [9, 10, 11, 12, 13, 14, 15];
-    return allHours.every(h => isHourDisabled(h));
-  };
-
   const handleDateChange = (e) => {
     const selectedDate = e.target.value;
     
@@ -240,7 +235,7 @@ function BookingApp() {
       } else {
         setStatus(res.data.error || 'No se encontró');
       }
-    } catch (err) {
+    } catch {
       setStatus('Error al buscar');
     } finally {
       setIsLoading(false);
@@ -273,7 +268,7 @@ function BookingApp() {
       } else {
         setStatus(res.data.error || 'Error al actualizar');
       }
-    } catch (err) {
+    } catch {
       setStatus('Error al editar');
     } finally {
       setEditLoading(false);
@@ -294,7 +289,7 @@ function BookingApp() {
       } else {
         setStatus(res.data.error || 'Error al cancelar');
       }
-    } catch (err) {
+    } catch {
       setStatus('Error al cancelar');
     }
   };
