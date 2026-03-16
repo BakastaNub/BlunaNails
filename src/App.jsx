@@ -1,25 +1,91 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import FullCalendar from '@fullcalendar/react';
-import dayGridPlugin from '@fullcalendar/daygrid';
-import interactionPlugin from '@fullcalendar/interaction';
-import esLocale from '@fullcalendar/core/locales/es';
 import { 
   FaSpinner, FaHandSparkles, FaShoePrints, FaSearch, 
-  FaCalendarAlt, FaPhoneAlt, FaEdit, FaTrashAlt, FaCheckCircle 
+  FaCalendarAlt, FaPhoneAlt, FaEdit, FaTrashAlt, FaCheckCircle,
+  FaWhatsapp, FaInstagram, FaArrowLeft, FaClock
 } from 'react-icons/fa';
 import './index.css';
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwLDtQGQqWBndlZfw8hcO0Fq5EaNYRxqLZkroTlEdjni96iLM1rUBlZExYyv_Nyhvdn/exec';
+const BASE_URL = 'https://cztzqqmoxrweebqtymij.supabase.co/functions/v1/';
+const CURRENT_YEAR = new Date().getFullYear();
 
-function App() {
-  const [mode, setMode] = useState('none');
+const URLS = {
+  getBooked:    `${BASE_URL}getBooked`,
+  findByPhone:  `${BASE_URL}findByPhone`,
+  create:       `${BASE_URL}create`,
+  edit:         `${BASE_URL}edit`,
+  cancel:       `${BASE_URL}cancel`,
+};
+
+function Landing() {
+  return (
+    <div className="landing">
+      <header className="landing-header">
+        <img src="/Logo.jpg" alt="Bluna Nail" className="landing-logo-img" />
+      </header>
+
+      <main className="landing-main">
+        <p className="hero-tagline">Estilo y Elegancia</p>
+        <h2 className="hero-title">Manicura & Pedicura<br/>Profesional</h2>
+        <p className="hero-subtitle">
+          Cuidamos tus manos y pies con los mejores productos y técnicas exclusivas para que luzcas siempre radiante.
+        </p>
+        
+        <button className="btn-landing" onClick={() => window.location.hash = 'reservar'}>
+          <FaCalendarAlt /> Agendar Cita
+        </button>
+
+        <div className="hero-services">
+          <div className="service-item">
+            <div className="service-icon">
+              <FaHandSparkles />
+            </div>
+            <h3>Manicura</h3>
+            <p>Cuida tus manos</p>
+          </div>
+          <div className="service-item">
+            <div className="service-icon">
+              <FaShoePrints />
+            </div>
+            <h3>Pedicura</h3>
+            <p>Pies perfectos</p>
+          </div>
+        </div>
+
+        <div className="hero-gallery">
+          <img src="/blunail1.png" alt="Diseño de uñas 1" />
+          <img src="/blunail2.png" alt="Diseño de uñas 2" />
+          <img src="/blunail3.png" alt="Diseño de uñas 3" />
+        </div>
+
+        <div className="landing-contact">
+          <h3>Contáctanos</h3>
+          <div className="contact-links">
+            <a href="https://www.instagram.com/blunanail.es/" target="_blank" rel="noopener noreferrer" className="contact-btn instagram">
+              <FaInstagram /> @blunanail.es
+            </a>
+          </div>
+        </div>
+      </main>
+
+      <footer className="landing-footer">
+        <p>&copy; {CURRENT_YEAR} Bluna Nail. Todos los derechos reservados.</p>
+      </footer>
+    </div>
+  );
+}
+
+function BookingApp() {
+  const [mode, setMode] = useState('create');
   const [booked, setBooked] = useState({});
+  const [loadingDates, setLoadingDates] = useState(true);
   const [createForm, setCreateForm] = useState({
     name: '', phone: '', hands: false, feet: false, date: '', time: ''
   });
   const [searchPhone, setSearchPhone] = useState('');
-  const [searchResult, setSearchResult] = useState(null);
+  const [searchResults, setSearchResults] = useState([]);
+  const [selectedBooking, setSelectedBooking] = useState(null);
   const [status, setStatus] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -27,11 +93,14 @@ function App() {
   const [editLoading, setEditLoading] = useState(false);
 
   const loadBookedDates = async () => {
+    setLoadingDates(true);
     try {
-      const res = await axios.get(`${SCRIPT_URL}?action=getBooked`);
+      const res = await axios.get(URLS.getBooked);
       setBooked(res.data || {});
     } catch (err) {
-      console.error('Error cargando booked dates:', err);
+      console.error('Error cargando fechas:', err);
+    } finally {
+      setLoadingDates(false);
     }
   };
 
@@ -39,156 +108,172 @@ function App() {
     loadBookedDates();
   }, []);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Date();
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const currentHour = today.getHours();
 
-  const handleDateClick = (info) => {
-    const date = info.dateStr;
-    if (date < today) {
-      setStatus('No se pueden reservar fechas pasadas');
+  const isToday = createForm.date === todayStr;
+  const bookedHoursForDate = booked[createForm.date] || {};
+
+  const isHourDisabled = (hour) => {
+    // Bloquear si ya está reservado
+    if (bookedHoursForDate[hour]) return true;
+    // Bloquear horas pasadas si es hoy
+    if (isToday && hour <= currentHour) return true;
+    return false;
+  };
+
+  const isHourDisabledForDate = (hour, bookedHours, date, hourNow) => {
+    if (bookedHours[hour]) return true;
+    const isTodayDate = date === todayStr;
+    if (isTodayDate && hour <= hourNow) return true;
+    return false;
+  };
+
+  const isAllHoursBooked = () => {
+    const allHours = [9, 10, 11, 12, 13, 14, 15];
+    return allHours.every(h => isHourDisabled(h));
+  };
+
+  const handleDateChange = (e) => {
+    const selectedDate = e.target.value;
+    
+    if (!selectedDate) {
+      setCreateForm(prev => ({ ...prev, date: '', time: '' }));
+      setStatus('');
       return;
     }
-    const count = booked[date] || 0;
-    if (count >= 5) {
-      setStatus('Este día ya está completo (máx. 5 citas)');
+
+    if (selectedDate < todayStr) {
+      setStatus('No puedes seleccionar fechas pasadas');
       return;
     }
-    setCreateForm(prev => ({ ...prev, date }));
-    setStatus(`Fecha seleccionada: ${date}`);
+
+    if (selectedDate === todayStr && currentHour >= 15) {
+      setStatus('Hoy no hay horarios disponibles');
+      return;
+    }
+
+    // Verificar si todas las horas están ocupadas
+    const bookedHours = booked[selectedDate] || {};
+    const totalBooked = Object.keys(bookedHours).length;
+    
+    if (totalBooked >= 5) {
+      setStatus('Día completo (máx. 5 citas)');
+      return;
+    }
+
+    const allHours = [9, 10, 11, 12, 13, 14, 15];
+    const availableHours = allHours.filter(h => !isHourDisabledForDate(h, bookedHours, selectedDate, currentHour));
+    
+    if (availableHours.length === 0) {
+      setStatus('No hay horarios disponibles para este día');
+      return;
+    }
+
+    setCreateForm(prev => ({ ...prev, date: selectedDate, time: '' }));
+    setStatus('');
   };
 
   const handleCreateSubmit = async (e) => {
-  e.preventDefault();
-  console.log("Formulario enviado → handleCreateSubmit iniciado"); // ← Depuración 1
+    e.preventDefault();
 
-  if (!createForm.date) {
-    setStatus('Selecciona una fecha primero');
-    console.log("Falta fecha");
-    return;
-  }
-  if (!createForm.time) {
-    setStatus('Selecciona una hora');
-    console.log("Falta hora");
-    return;
-  }
-  if (!createForm.hands && !createForm.feet) {
-    setStatus('Selecciona al menos manos o pies');
-    console.log("Faltan servicios");
-    return;
-  }
+    if (!createForm.date) return setStatus('Selecciona una fecha');
+    if (!createForm.time) return setStatus('Selecciona una hora');
+    if (!createForm.hands && !createForm.feet) return setStatus('Selecciona al menos un servicio');
 
-  console.log("Datos a enviar:", createForm); // ← Depuración 2: qué se envía
+    setStatus('Enviando...');
+    setIsLoading(true);
 
-  setStatus('Enviando reserva...');
+    try {
+      const payload = {
+        name: createForm.name.trim(),
+        phone: createForm.phone.trim(),
+        hands: createForm.hands,
+        feet: createForm.feet,
+        date: createForm.date,
+        time: createForm.time,
+      };
 
-  try {
-    const formData = new URLSearchParams();
-    formData.append('action', 'create');
-    formData.append('name', createForm.name.trim());
-    formData.append('phone', createForm.phone.trim());
-    formData.append('hands', createForm.hands ? 'true' : 'false'); // mejor formato para backend
-    formData.append('feet', createForm.feet ? 'true' : 'false');
-    formData.append('date', createForm.date);
-    formData.append('time', createForm.time);
+      const res = await axios.post(URLS.create, payload, {
+        headers: { 'Content-Type': 'application/json' }
+      });
 
-    console.log("URLSearchParams listo:", formData.toString()); // ← Depuración 3
-
-    const res = await axios.post(SCRIPT_URL, formData.toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
-
-    console.log("Respuesta del servidor:", res.data); // ← Depuración 4: qué devuelve
-
-    if (res.data.success) {
-      setStatus(`¡Cita reservada con éxito! 🎀 ID: ${res.data.id || 'generado'}`);
-      setCreateForm({ name: '', phone: '', hands: false, feet: false, date: '', time: '' });
-      loadBookedDates();
-    } else {
-      setStatus(res.data.error || 'Error desconocido al guardar');
+      if (res.data.success) {
+        setStatus('¡Cita reservada con éxito!');
+        setCreateForm({ name: '', phone: '', hands: false, feet: false, date: '', time: '' });
+        loadBookedDates();
+      } else {
+        setStatus(res.data.error || 'Error al guardar');
+      }
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message || 'Error de conexión';
+      setStatus(msg);
+    } finally {
+      setIsLoading(false);
     }
-  } catch (err) {
-    console.error("Error completo al crear cita:", err);
-    if (err.response) {
-      // Error del servidor (4xx/5xx)
-      console.error("Respuesta con error:", err.response.data);
-      setStatus(`Error del servidor: ${err.response.data?.error || err.message}`);
-    } else if (err.request) {
-      // No hubo respuesta (problema de red, CORS, timeout)
-      setStatus('No se pudo conectar con el servidor. Revisa conexión o despliegue del script.');
-    } else {
-      setStatus('Error inesperado: ' + err.message);
-    }
-  }
-};
+  };
 
   const handleSearch = async (e) => {
     e.preventDefault();
     const phone = searchPhone.trim();
-    if (!phone) return setStatus('Ingresa el número de teléfono');
+    if (!phone) return setStatus('Ingresa tu teléfono');
 
     setIsLoading(true);
     setStatus('');
-    setSearchResult(null);
+    setSearchResults([]);
+    setSelectedBooking(null);
     setIsEditing(false);
 
     try {
-      const res = await axios.get(`${SCRIPT_URL}?action=findByPhone&phone=${encodeURIComponent(phone)}`);
-      const result = res.data;
+      const res = await axios.get(`${URLS.findByPhone}?phone=${encodeURIComponent(phone)}`);
 
-      if (result.success) {
-        setSearchResult(result.booking);
-        setEditForm({
-          hands: result.booking.hands === 'Sí',
-          feet: result.booking.feet === 'Sí'
-        });
-        if (result.bookings?.length > 1) {
-          setStatus(`Se encontraron ${result.bookings.length} citas activas. Mostrando la más reciente.`);
+      if (res.data.success) {
+        setSearchResults(res.data.bookings || []);
+        if (res.data.bookings.length === 1) {
+          const booking = res.data.bookings[0];
+          setSelectedBooking(booking);
+          setEditForm({ hands: booking.hands === 'Sí', feet: booking.feet === 'Sí' });
+        } else if (res.data.bookings.length > 1) {
+          setStatus(`${res.data.bookings.length} citas encontradas`);
         }
       } else {
-        setStatus(result.message || 'No se encontró ninguna cita programada');
+        setStatus(res.data.error || 'No se encontró');
       }
     } catch (err) {
-      console.error('Error búsqueda:', err);
-      setStatus('Error al consultar');
+      setStatus('Error al buscar');
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleEditSubmit = async () => {
+    if (!selectedBooking) return;
+
     setEditLoading(true);
-    setStatus('Editando...');
 
     if (!editForm.hands && !editForm.feet) {
-      if (window.confirm('Si desmarcas ambos servicios, se cancelará la cita. ¿Continuar?')) {
-        await handleCancel();
-        setEditLoading(false);
-        return;
-      } else {
+      if (!window.confirm('Sin servicios = cancelar cita. ¿Continuar?')) {
         setEditLoading(false);
         return;
       }
+      await handleCancel();
+      setEditLoading(false);
+      return;
     }
 
     try {
-      const formData = new URLSearchParams();
-      formData.append('action', 'edit');
-      formData.append('id', searchResult.id);           // ← Usamos ID
-      formData.append('hands', editForm.hands);
-      formData.append('feet', editForm.feet);
-
-      const res = await axios.post(SCRIPT_URL, formData.toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      });
+      const payload = { id: selectedBooking.id, hands: editForm.hands, feet: editForm.feet };
+      const res = await axios.post(URLS.edit, payload, { headers: { 'Content-Type': 'application/json' } });
 
       if (res.data.success) {
-        setStatus('¡Servicios actualizados correctamente! ✓');
+        setStatus('Servicios actualizados');
         setIsEditing(false);
-        await handleSearch({ preventDefault: () => {} });
+        handleSearch({ preventDefault: () => {} });
       } else {
-        setStatus(res.data.error || 'No se pudo actualizar');
+        setStatus(res.data.error || 'Error al actualizar');
       }
     } catch (err) {
-      console.error('Error edición:', err.response?.data || err);
       setStatus('Error al editar');
     } finally {
       setEditLoading(false);
@@ -196,143 +281,171 @@ function App() {
   };
 
   const handleCancel = async () => {
-    if (!window.confirm('¿Estás seguro de cancelar esta cita? No se puede deshacer.')) return;
+    if (!selectedBooking || !window.confirm('¿Cancelar esta cita?')) return;
 
     try {
-      const formData = new URLSearchParams();
-      formData.append('action', 'cancel');
-      formData.append('id', searchResult.id);           // ← Usamos ID
-
-      const res = await axios.post(SCRIPT_URL, formData.toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      });
+      const res = await axios.post(URLS.cancel, { id: selectedBooking.id }, { headers: { 'Content-Type': 'application/json' } });
 
       if (res.data.success) {
-        setStatus('Cita cancelada correctamente');
-        setSearchResult(null);
+        setStatus('Cita cancelada');
+        setSearchResults(prev => prev.filter(b => b.id !== selectedBooking.id));
+        setSelectedBooking(null);
         loadBookedDates();
       } else {
         setStatus(res.data.error || 'Error al cancelar');
       }
     } catch (err) {
-      console.error('Error cancel:', err.response?.data || err);
-      setStatus('Error al cancelar la cita');
+      setStatus('Error al cancelar');
     }
   };
 
-  const resetSearch = () => {
-    setSearchPhone('');
-    setSearchResult(null);
-    setStatus('');
-    setIsLoading(false);
-    setIsEditing(false);
-  };
-
   const formatTime12h = (time24) => {
-    if (!time24) return 'No especificada';
+    if (!time24) return '—';
     const [h, m] = time24.split(':');
     const hour = parseInt(h, 10);
-    const hour12 = hour % 12 || 12;
-    const period = hour >= 12 ? 'PM' : 'AM';
-    return `${hour12}:${m} ${period}`;
+    return `${hour % 12 || 12}:${m.padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`;
+  };
+
+  const formatServices = (hands, feet) => {
+    const parts = [];
+    if (hands === 'Sí') parts.push('Manicura');
+    if (feet === 'Sí') parts.push('Pedicura');
+    return parts.length ? parts.join(' + ') : '—';
   };
 
   return (
     <div className="container">
-      <header>
-        <h1>Reservas de Uñas</h1>
-        <p>Manicura · Pedicura · Cuidado y estilo para tus manos y pies</p>
+      <button className="btn-back" onClick={() => window.location.hash = ''}>
+        <FaArrowLeft /> Volver
+      </button>
+
+      <header className="booking-header">
+        <h1>Bluna Nail</h1>
+        <p>Reserva tu cita</p>
       </header>
 
       <div className="btn-group">
-        <button
-          className={`btn btn-create ${mode === 'create' ? 'active' : ''}`}
-          onClick={() => { setMode('create'); setSearchResult(null); setStatus(''); }}
+        <button 
+          className={mode === 'create' ? 'active' : ''} 
+          onClick={() => { setMode('create'); setStatus(''); setSearchResults([]); setSelectedBooking(null); }}
         >
-          <FaCalendarAlt style={{ marginRight: '8px' }} />
-          Solicitar Cita
+          <FaCalendarAlt /> Nueva Cita
         </button>
-
-        <button
-          className={`btn btn-search ${mode === 'search' ? 'active' : ''}`}
+        <button 
+          className={mode === 'search' ? 'active' : ''} 
           onClick={() => { setMode('search'); setStatus(''); }}
         >
-          <FaSearch style={{ marginRight: '8px' }} />
-          Consultar mi cita
+          <FaSearch /> Mi Cita
         </button>
       </div>
 
       {mode === 'create' && (
         <div className="card">
-          <h2>Nueva reserva</h2>
-
+          <h2>Nueva Reserva</h2>
           <form onSubmit={handleCreateSubmit}>
             <div className="form-group">
-              <label>Nombre completo *</label>
-              <input
-                required
-                value={createForm.name}
-                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                placeholder="Ej: María García"
+              <label>Nombre</label>
+              <input 
+                required 
+                value={createForm.name} 
+                onChange={e => setCreateForm({...createForm, name: e.target.value})} 
+                placeholder="Tu nombre"
               />
             </div>
 
             <div className="form-group">
-              <label>Teléfono (WhatsApp) *</label>
-              <div style={{ position: 'relative' }}>
-                <FaPhoneAlt style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#888' }} />
-                <input
-                  required
-                  value={createForm.phone}
-                  onChange={(e) => setCreateForm({ ...createForm, phone: e.target.value })}
-                  placeholder="Ej: 612345678"
-                  type="tel"
-                  style={{ paddingLeft: '36px' }}
-                />
-              </div>
+              <label>Teléfono</label>
+              <input 
+                required 
+                type="tel" 
+                value={createForm.phone} 
+                onChange={e => setCreateForm({...createForm, phone: e.target.value})} 
+                placeholder="612 345 678"
+              />
             </div>
 
             <div className="checkbox-group">
               <label>
-                <input
-                  type="checkbox"
-                  checked={createForm.hands}
-                  onChange={(e) => setCreateForm({ ...createForm, hands: e.target.checked })}
-                />
-                <FaHandSparkles style={{ marginLeft: '8px', marginRight: '6px' }} />
-                Manos (manicura)
+                <input 
+                  type="checkbox" 
+                  checked={createForm.hands} 
+                  onChange={e => setCreateForm({...createForm, hands: e.target.checked})} 
+                /> 
+                Manicura
               </label>
               <label>
-                <input
-                  type="checkbox"
-                  checked={createForm.feet}
-                  onChange={(e) => setCreateForm({ ...createForm, feet: e.target.checked })}
-                />
-                <FaShoePrints style={{ marginLeft: '8px', marginRight: '6px' }} />
-                Pies (pedicura)
+                <input 
+                  type="checkbox" 
+                  checked={createForm.feet} 
+                  onChange={e => setCreateForm({...createForm, feet: e.target.checked})} 
+                /> 
+                Pedicura
               </label>
             </div>
 
             <div className="form-group">
-              <label>Fecha seleccionada</label>
-              <input type="text" value={createForm.date || 'Selecciona en el calendario'} readOnly />
+              <label>Fecha {loadingDates && <span className="loading-text">(Cargando...)</span>}</label>
+              <div className="date-input-wrapper">
+                <input 
+                  type="date"
+                  min={todayStr}
+                  value={createForm.date}
+                  onChange={handleDateChange}
+                  disabled={loadingDates}
+                />
+                <FaCalendarAlt className="date-icon" />
+              </div>
             </div>
 
             <div className="form-group">
-              <label>Hora *</label>
-              <input
-                type="time"
-                min="09:00"
-                max="20:00"
-                step="1800"
-                value={createForm.time}
-                onChange={(e) => setCreateForm({ ...createForm, time: e.target.value })}
+              <label>
+                <FaClock style={{ marginRight: 5 }} />
+                Hora {isToday && currentHour >= 9 ? `(Desde las ${currentHour + 1}h)` : '9:00 - 15:00'}
+              </label>
+              <select 
+                value={createForm.time} 
+                onChange={e => setCreateForm({...createForm, time: e.target.value})} 
                 required
-              />
+                disabled={!createForm.date || loadingDates}
+              >
+                <option value="">Selecciona hora</option>
+                <option value="09:00" disabled={isHourDisabled(9)}>
+                  9:00 {isHourDisabled(9) ? '❌' : '✓'}
+                </option>
+                <option value="10:00" disabled={isHourDisabled(10)}>
+                  10:00 {isHourDisabled(10) ? '❌' : '✓'}
+                </option>
+                <option value="11:00" disabled={isHourDisabled(11)}>
+                  11:00 {isHourDisabled(11) ? '❌' : '✓'}
+                </option>
+                <option value="12:00" disabled={isHourDisabled(12)}>
+                  12:00 {isHourDisabled(12) ? '❌' : '✓'}
+                </option>
+                <option value="13:00" disabled={isHourDisabled(13)}>
+                  13:00 {isHourDisabled(13) ? '❌' : '✓'}
+                </option>
+                <option value="14:00" disabled={isHourDisabled(14)}>
+                  14:00 {isHourDisabled(14) ? '❌' : '✓'}
+                </option>
+                <option value="15:00" disabled={isHourDisabled(15)}>
+                  15:00 {isHourDisabled(15) ? '❌' : '✓'}
+                </option>
+              </select>
+              {createForm.date && (
+                <p className="hours-info">
+                  ✓ Disponible · ❌ Occupado/Pasado
+                </p>
+              )}
             </div>
 
-            <button type="submit" className="btn btn-create">
-              Reservar cita
+            {status && (
+              <div className={`status-message ${status.includes('éxito') ? 'success' : 'error'}`}>
+                {status}
+              </div>
+            )}
+
+            <button type="submit" className="btn-submit" disabled={isLoading}>
+              {isLoading ? <FaSpinner className="spin" /> : 'Reservar Cita'}
             </button>
           </form>
         </div>
@@ -340,222 +453,115 @@ function App() {
 
       {mode === 'search' && (
         <div className="card">
-          <h2>Consultar tu cita</h2>
-
+          <h2>Consultar Cita</h2>
           <form onSubmit={handleSearch}>
             <div className="form-group">
-              <label>Teléfono con el que reservaste *</label>
-              <div style={{ position: 'relative' }}>
-                <FaPhoneAlt style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#888' }} />
-                <input
-                  value={searchPhone}
-                  onChange={(e) => setSearchPhone(e.target.value)}
-                  placeholder="Ej: 612345678"
-                  type="tel"
-                  style={{ paddingLeft: '36px' }}
-                />
-              </div>
+              <label>Teléfono</label>
+              <input 
+                type="tel" 
+                value={searchPhone} 
+                onChange={e => setSearchPhone(e.target.value)} 
+                placeholder="Teléfono de la reserva"
+              />
             </div>
-
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <button type="submit" className="btn btn-search" disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <FaSpinner className="spin" style={{ marginRight: '8px' }} />
-                    Buscando...
-                  </>
-                ) : (
-                  <>
-                    <FaSearch style={{ marginRight: '8px' }} />
-                    Buscar cita
-                  </>
-                )}
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={resetSearch} disabled={isLoading}>
-                Limpiar
-              </button>
-            </div>
+            <button type="submit" className="btn-submit" disabled={isLoading}>
+              {isLoading ? 'Buscando...' : 'Buscar'}
+            </button>
           </form>
 
-          {isLoading && (
-            <div style={{ textAlign: 'center', margin: '3rem 0', color: 'var(--primary)' }}>
-              <FaSpinner className="spin" style={{ fontSize: '3rem', marginBottom: '1rem' }} />
-              <p>Consultando tu cita...</p>
-            </div>
-          )}
-
-          {searchResult && !isLoading && (
+          {searchResults.length > 0 && (
             <div className="booking-result">
-              <h3>Tu reserva ({searchResult.status})</h3>
-              <p><strong>ID de cita:</strong> {searchResult.id}</p>
-              <p><strong>Nombre:</strong> {searchResult.name}</p>
-              <p><strong>Teléfono:</strong> {searchResult.phone}</p>
-              
-              <div style={{ 
-                margin: '1.5rem 0', 
-                padding: '1.4rem', 
-                background: '#fff0f5', 
-                borderRadius: '12px', 
-                border: '1px solid #ffc1e3' 
-              }}>
-                <strong style={{ display: 'block', marginBottom: '1rem', fontSize: '1.1rem', color: 'var(--primary-dark)' }}>
-                  Servicios reservados:
-                </strong>
-                
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <FaHandSparkles 
+              {searchResults.length > 1 ? (
+                <>
+                  <h3>{searchResults.length} citas activas</h3>
+                  {searchResults.map(booking => (
+                    <div 
+                      key={booking.id}
                       style={{ 
-                        fontSize: '1.8rem', 
-                        color: searchResult.hands === 'Sí' ? 'var(--primary)' : '#d1d1d1',
-                        opacity: searchResult.hands === 'Sí' ? 1 : 0.6
-                      }} 
-                    />
-                    <span style={{ 
-                      fontWeight: searchResult.hands === 'Sí' ? '600' : 'normal',
-                      color: searchResult.hands === 'Sí' ? 'var(--primary-dark)' : '#777'
-                    }}>
-                      Manicura {searchResult.hands === 'Sí' ? '✓ reservada' : 'no reservada'}
-                    </span>
-                  </div>
-                  
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <FaShoePrints 
-                      style={{ 
-                        fontSize: '1.8rem', 
-                        color: searchResult.feet === 'Sí' ? 'var(--primary)' : '#d1d1d1',
-                        opacity: searchResult.feet === 'Sí' ? 1 : 0.6
-                      }} 
-                    />
-                    <span style={{ 
-                      fontWeight: searchResult.feet === 'Sí' ? '600' : 'normal',
-                      color: searchResult.feet === 'Sí' ? 'var(--primary-dark)' : '#777'
-                    }}>
-                      Pedicura {searchResult.feet === 'Sí' ? '✓ reservada' : 'no reservada'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <p>
-                <strong>Fecha y hora:</strong> {searchResult.date}{' '}
-                <span style={{ fontWeight: 'bold', color: 'var(--primary)' }}>
-                  {formatTime12h(searchResult.time)}
-                </span>
-              </p>
-
-              {searchResult.status === 'Programada' && (
-                <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
-                  <button 
-                    className="btn btn-secondary"
-                    onClick={() => setIsEditing(true)}
-                    disabled={editLoading}
-                  >
-                    <FaEdit style={{ marginRight: '8px' }} />
-                    Editar servicios
-                  </button>
-                  <button 
-                    className="btn" 
-                    style={{ background: '#f44336', color: 'white' }}
-                    onClick={handleCancel}
-                    disabled={editLoading}
-                  >
-                    <FaTrashAlt style={{ marginRight: '8px' }} />
-                    Cancelar cita
-                  </button>
-                </div>
-              )}
-
-              {isEditing && (
-                <div style={{ marginTop: '2rem', padding: '1.5rem', background: '#f9f9f9', borderRadius: '12px' }}>
-                  <h4>Editar servicios</h4>
-                  <div className="checkbox-group" style={{ margin: '1rem 0' }}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={editForm.hands}
-                        onChange={(e) => setEditForm({ ...editForm, hands: e.target.checked })}
-                      />
-                      <FaHandSparkles style={{ marginLeft: '8px', marginRight: '6px' }} />
-                      Manos (manicura)
-                    </label>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={editForm.feet}
-                        onChange={(e) => setEditForm({ ...editForm, feet: e.target.checked })}
-                      />
-                      <FaShoePrints style={{ marginLeft: '8px', marginRight: '6px' }} />
-                      Pies (pedicura)
-                    </label>
-                  </div>
-                  <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                    <button 
-                      className="btn btn-secondary"
-                      onClick={() => setIsEditing(false)}
-                      disabled={editLoading}
+                        padding: '0.8rem', 
+                        background: selectedBooking?.id === booking.id ? 'white' : 'rgba(255,255,255,0.5)', 
+                        borderRadius: 8, 
+                        marginBottom: '0.5rem',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => {
+                        setSelectedBooking(booking);
+                        setEditForm({ hands: booking.hands === 'Sí', feet: booking.feet === 'Sí' });
+                      }}
                     >
-                      Cancelar
-                    </button>
-                    <button 
-                      className="btn btn-create"
-                      onClick={handleEditSubmit}
-                      disabled={editLoading}
-                    >
-                      {editLoading ? (
-                        <>Guardando... <FaSpinner className="spin" style={{ marginLeft: '8px' }} /></>
-                      ) : (
-                        <>Guardar cambios <FaCheckCircle style={{ marginLeft: '8px' }} /></>
-                      )}
-                    </button>
-                  </div>
-                </div>
+                      <p><strong>{booking.date}</strong> - {formatTime12h(booking.time)}</p>
+                      <p>{formatServices(booking.hands, booking.feet)}</p>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                selectedBooking && (
+                  <>
+                    <h3>Tu Reserva</h3>
+                    <p><strong>Fecha:</strong> {selectedBooking.date}</p>
+                    <p><strong>Hora:</strong> {formatTime12h(selectedBooking.time)}</p>
+                    <p><strong>Servicios:</strong> {formatServices(selectedBooking.hands, selectedBooking.feet)}</p>
+
+                    {selectedBooking.status === 'Programada' && (
+                      <div className="booking-actions">
+                        <button className="btn-secondary" onClick={() => setIsEditing(true)}>
+                          <FaEdit /> Editar
+                        </button>
+                        <button className="btn-danger" onClick={handleCancel}>
+                          <FaTrashAlt /> Cancelar
+                        </button>
+                      </div>
+                    )}
+
+                    {isEditing && (
+                      <div style={{ marginTop: '1rem', padding: '1rem', background: 'white', borderRadius: 8 }}>
+                        <div className="checkbox-group">
+                          <label>
+                            <input type="checkbox" checked={editForm.hands} onChange={e => setEditForm({...editForm, hands: e.target.checked})} /> 
+                            Manicura
+                          </label>
+                          <label>
+                            <input type="checkbox" checked={editForm.feet} onChange={e => setEditForm({...editForm, feet: e.target.checked})} /> 
+                            Pedicura
+                          </label>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button className="btn-secondary" onClick={() => setIsEditing(false)}>Cancelar</button>
+                          <button className="btn-submit" onClick={handleEditSubmit} disabled={editLoading}>
+                            {editLoading ? <FaSpinner className="spin" /> : 'Guardar'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )
               )}
             </div>
           )}
 
-          {status && !searchResult && !isLoading && (
-            <div className={`status-message ${status.includes('correctamente') || status.includes('éxito') ? 'success' : 'error'}`}>
-              {status}
-            </div>
+          {status && !searchResults.length && (
+            <div className="status-message error">{status}</div>
           )}
         </div>
       )}
-
-      {/* Calendario siempre visible */}
-      <div className="card">
-        <h2>Calendario de disponibilidad</h2>
-        <FullCalendar
-          plugins={[dayGridPlugin, interactionPlugin]}
-          initialView="dayGridMonth"
-          editable={false}
-          selectable={false}
-          dateClick={handleDateClick}
-          events={Object.entries(booked).map(([date, count]) => {
-            if (date < today) return null;
-            return {
-              title: `${count} cita${count !== 1 ? 's' : ''}`,
-              start: date,
-              color: count >= 5 ? '#f44336' : '#ff9800'
-            };
-          }).filter(Boolean)}
-          height={500}
-          locale={esLocale}
-          headerToolbar={{
-            left: 'prev,next',
-            center: 'title',
-            right: ''
-          }}
-          dayCellClassNames={(arg) => {
-            if (arg.date.toISOString().split('T')[0] < today) {
-              return 'past-date';
-            }
-            return '';
-          }}
-        />
-      </div>
     </div>
   );
+}
+
+function App() {
+  const [showBooking, setShowBooking] = useState(false);
+
+  useEffect(() => {
+    const handleHash = () => {
+      setShowBooking(window.location.hash === '#reservar');
+    };
+    
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  return showBooking ? <BookingApp /> : <Landing />;
 }
 
 export default App;
